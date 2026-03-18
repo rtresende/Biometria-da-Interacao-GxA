@@ -24,7 +24,7 @@ modelagem ambientômica para integração G×A e recomendação de genótipos.
 | 1 | 11/03 | Introdução conceitual e histórica da G×A |
 | 2 | 18/03 | ANOVA conjunta e componentes de variação |
 | 3 | 25/03 | Regressão de Finlay-Wilkinson |
-| 4 | 01/04 | Índices clássicos de estabilidade |
+| 4 | 01/04 | Índices clássicos de adaptabilidade e estabilidade |
 | 5 | 08/04 | AMMI e GGE Biplot |
 | 6 | 15/04 | Modelos mistos I — BLUP multiambiente |
 | 7 | 22/04 | Modelos mistos II — Estruturas de variância |
@@ -57,6 +57,7 @@ install.packages(c(
   "lme4",       # modelos mistos
   "metan",      # AMMI, GGE, estabilidade
   "ggplot2"     # visualização
+# entre vários outros!
 ))
 ```
 
