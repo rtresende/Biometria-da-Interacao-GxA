@@ -5,7 +5,7 @@
 # Prof. Dr. Rafael Tassinari Resende
 #
 # Modelo assumido (Cruz, Regazzi e Carneiro, 2012 - caso c):
-#   Ambientes (A)                          : FIXOS
+#   Ambientes (A)                          : FIXO
 #   Genotipos (G), G×A, Blocos e Erro      : ALEATORIOS
 #
 # E(QM) sob esse modelo:
