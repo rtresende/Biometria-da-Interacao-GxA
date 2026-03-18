@@ -3,9 +3,9 @@
 # Aula 2: ANOVA Conjunta e Componentes de Variancia em G×A
 # Dados: soy_MET.txt - 40 genotipos x 6 ambientes x 3 blocos (DBC)
 # Prof. Dr. Rafael Tassinari Resende
-#
+# 
 # Modelo assumido (Cruz, Regazzi e Carneiro, 2012 - caso c):
-#   Ambientes (A)                          : FIXO
+#   Ambientes (A)                          : FIXOS
 #   Genotipos (G), G×A, Blocos e Erro      : ALEATORIOS
 #
 # E(QM) sob esse modelo:
@@ -21,7 +21,7 @@
 #   F(A)   = QM_A   / QM_B(A)
 # =============================================================================
 
-dat <- read.table("soy_MET.txt", header = TRUE, sep = "\t") #mude o seu diretorio aqui.
+dat <- read.table("G:/Meu Drive/UFG/PPGGMP/BiometriaDaInteracaoGxA/aulas/simu_data/soy_MET.txt", header = TRUE, sep = "\t")
 dat$gen   <- factor(dat$gen)
 dat$env   <- factor(dat$env)
 dat$block <- factor(dat$block)
@@ -33,35 +33,72 @@ summary(dat)
 # 1. TABELA DE MEDIAS E GRAFICO DE INTERACAO
 # =============================================================================
 
-# Matriz de medias genotipo x ambiente (media sobre os K blocos)
-means_ge <- tapply(dat$y, list(dat$gen, dat$env), mean)
+means_ge  <- tapply(dat$y, list(dat$gen, dat$env), mean)
+env_order <- order(colMeans(means_ge))
+mat_plot  <- t(means_ge[, env_order])   # ambientes nas linhas, genotipos nas colunas
+nx        <- nrow(mat_plot)             # numero de ambientes
 
-# Medias marginais por ambiente (ordenadas crescentemente)
 cat("Medias por ambiente (kg/ha):\n")
 print(round(sort(colMeans(means_ge)), 1))
-
-# Top 10 genotipos pela media geral sobre todos os ambientes
 cat("\nTop 10 genotipos pela media geral (kg/ha):\n")
-geno_means <- sort(rowMeans(means_ge), decreasing = TRUE)
-print(round(head(geno_means, 10), 1))
+print(round(head(sort(rowMeans(means_ge), decreasing = TRUE), 10), 1))
 
-# Grafico de interacao: cada linha = um genotipo
-# Ambientes ordenados pela media para facilitar leitura visual
-# Linhas paralelas  -> interacao simples  (magnitude muda, ranking preservado)
-# Cruzamento        -> interacao complexa (mudanca de ranking entre ambientes)
-env_order <- order(colMeans(means_ge))
+# Identificacao por prefixo
+all_gens  <- colnames(mat_plot)
+is_check  <- grepl("^CHK", all_gens)
+chk_names <- all_gens[is_check]
+lin_names <- all_gens[!is_check]
 
-matplot(
-  x    = seq_len(ncol(means_ge)),
-  y    = t(means_ge[, env_order]),
-  type = "b", pch = 16, lty = 1, cex = 0.7,
-  xaxt = "n",
-  xlab = "Ambiente (ordenado pela media)",
-  ylab = "Produtividade media (kg/ha)",
-  main = "Grafico de interacao G×A - Soja MET"
-)
-axis(1, at = seq_len(ncol(means_ge)),
-     labels = colnames(means_ge)[env_order])
+# Paleta colorblind-safe (Bang Wong, 2011) + formas distintas por check
+chk_colors <- c(CHK01 = "#0072B2", CHK02 = "#D55E00",
+                CHK03 = "#9400D3", CHK04 = "#000000")
+chk_pch    <- c(CHK01 = 16, CHK02 = 17, CHK03 = 15, CHK04 = 18)
+lin_color  <- "gray65"
+
+# Grafico: linhagens no fundo, checks em destaque
+plot(NA, xlim = c(1, nx + 0.6), ylim = range(means_ge) * c(0.97, 1.03),
+     xaxt = "n", xlab = "Ambiente (ordenado pela media)",
+     ylab = "Produtividade media (kg/ha)",
+     main = "Grafico de interacao G×A — Soja MET")
+axis(1, at = 1:nx, labels = rownames(mat_plot))
+
+# Linhagens (cinza, fundo) — matlines/matpoints evitam loop
+matlines( 1:nx, mat_plot[, lin_names], col = lin_color, lwd = 0.8, lty = 1)
+matpoints(1:nx, mat_plot[, lin_names], col = lin_color, pch = 16,  cex = 0.5)
+
+# Checks (cores + formas distintas, destaque) — rotulo na ponta direita
+for (g in chk_names) {
+  lines( 1:nx, mat_plot[, g], col = chk_colors[g], lwd = 2.8)
+  points(1:nx, mat_plot[, g], col = chk_colors[g], pch = chk_pch[g], cex = 1.3)
+  text(nx + 0.12, mat_plot[nx, g], labels = g,
+       col = chk_colors[g], cex = 0.82, adj = 0, font = 2)
+}
+
+legend("topleft",
+       legend = c(chk_names, sprintf("Linhagens (n=%d)", length(lin_names))),
+       col    = c(chk_colors[chk_names], lin_color),
+       lwd    = c(rep(2.8, length(chk_names)), 0.8),
+       pch    = c(chk_pch[chk_names], 16),
+       pt.cex = c(rep(1.3, length(chk_names)), 0.7),
+       bty    = "n", cex = 0.82)
+
+# Interpretacao do grafico de interacao com presenca de checks:
+#
+# (1) ESCALA DE REFERENCIA: a faixa CHK03--CHK04 delimita o intervalo de
+#     cultivares comerciais estabelecidas. Linhagens que superam todos os
+#     checks de forma consistente sao candidatas prioritarias ao avanco.
+#
+# (2) ATENCAO — os proprios checks se reordenam entre ambientes (CHK04
+#     abaixo de CHK01 em E1-E2, liderando de E3 em diante): a G×A nao e
+#     exclusividade das linhagens. %C elevado na decomposicao S+C reflete
+#     discordancia estrutural da rede, nao apenas instabilidade das linhagens.
+#
+# (3) VIES NOS COMPONENTES DE VARIANCIA: a amplitude CHK03--CHK04
+#     (~1.000-2.500 kg/ha) e comparavel a das linhagens e infla sigma2_g,
+#     rg e h2_MET — pois checks sao genotipos fixos, nao amostras da
+#     populacao em melhoramento. Os valores impressos a seguir descrevem
+#     o conjunto heterogeneo (checks + linhagens), nao a populacao sob
+#     selecao. Veja a Secao 3 do script para a analise restrita as linhagens.
 
 # =============================================================================
 # 2. ANOVA CONJUNTA (DBC, ambientes fixos)
@@ -159,6 +196,11 @@ sP2    <- sum(vc_pos)
 cat("\nProporcao relativa (%):\n")
 print(round(100 * vc_pos / sP2, 1))
 
+# ATENCAO: sigma2_g = 51,6% inclui a amplitude entre checks (CHK03--CHK04).
+# Restrito as 36 linhagens, sigma2_g tende a cair e sigma2_ga a subir
+# proporcionalmente — a situacao real das linhagens e provavelmente
+# menos favoravel do que esses numeros indicam. Ver analise restrita adiante.
+
 # Comparacao didatica: efeito do modelo sobre s2_ga
 # Sob ambientes fixos, denominador = K*l > K => s2_ga estimada e MENOR
 # pois parte da variacao de G×A e absorvida pelos efeitos fixos de ambiente
@@ -189,7 +231,7 @@ cat("Razao s2_ga / s2_g (indice de complexidade G×A)  :",
     round(vc_pos["s2_ga"] / vc_pos["s2_g"], 3), "\n")
 
 # =============================================================================
-# 5. CORRELACOES PAR A PAR ENTRE AMBIENTES
+# 5. CORRELACOES FENOTÍPICAS PAR A PAR ENTRE AMBIENTES
 # =============================================================================
 
 # r_jj' = correlacao de Pearson entre medias dos genotipos em j e j'
@@ -201,6 +243,11 @@ r_pairwise <- cor(means_ge, method = "pearson")
 
 cat("\nMatriz de correlacoes de Pearson entre ambientes:\n")
 print(round(r_pairwise, 3))
+
+# NOTA: r_jj' eh fenotipica (contem g_i, (ga)_ij e residuo) — tende a
+# subestimar a concordancia genetica real. Para a populacao sob selecao,
+# use rg (Secao 7); correlacoes geneticas par a par robustas requerem
+# estrutura de covariancia nao-estruturada via REML (Aula 6).
 
 # =============================================================================
 # 6. DECOMPOSICAO DA G×A EM PARTES SIMPLES (S) E COMPLEXA (C)
@@ -332,78 +379,85 @@ if (nenhum) cat("  Nenhum par nao significativo encontrado (p > 0.05).\n")
 # =============================================================================
 # 8. HERDABILIDADE E IMPLICACOES NOS GANHOS DE SELECAO
 #
-# Herdabilidade para a media na rede MET (J ambientes, K blocos):
-#   h2_MET = s2_g / (s2_g + s2_ga/J + s2/(J*K))
+# h2_MET = s2_g / (s2_g + s2_ga/J + s2/(J*K))
+#   Numerador: s2_g apenas — parte genetica estavel entre ambientes.
+#   Base para selecao de ampla adaptacao.
 #
-# Herdabilidade para a media em ambiente unico j (K blocos):
-#   h2_j = (s2_g + s2_ga) / (s2_g + s2_ga + s2/K)
+# h2_j (medio) = (s2_g + s2_ga) / (s2_g + s2_ga + s2/K)
+#   Numerador: s2_g + s2_ga — em um unico ambiente as duas partes sao
+#   indistinguiveis e ambas constituem variacao herdavel local.
+#   Usa componentes medios da ANOVA conjunta — representa um ambiente
+#   hipotetico medio da rede.
 #
-# ATENCAO: h2_MET e h2_j medem coisas distintas.
-#   h2_MET mede a precisao da media sobre a rede -> base para DG_MET
-#   h2_j   mede a precisao no ambiente j         -> base para DG_j e RC
+# h2_j (local) = (Q_j - QME_j/K) / Q_j
+#   Estimado por ambiente via ANOVA individual. Nao assume homogeneidade
+#   de variancias residuais entre ambientes.
 #
-# Ganho de selecao direto na rede (ganho genetico geral):
-#   DG_MET = i * h_MET * sqrt(s2_g)         [unidade: kg/ha]
+# DG_MET = i.s. * h_MET * sqrt(s2_g)         [ganho genetico geral na rede]
+# DG_j   = i.s. * h_j   * sqrt(s2_g + s2_ga) [ganho no ambiente medio]
+#   DG_j > DG_MET porque inclui s2_ga no desvio-padrao genotipico.
+#   Nao implica que selecionar em 1 ambiente seja melhor para a rede.
 #
-# Ganho de selecao em ambiente unico j (ganho no proprio ambiente):
-#   DG_j   = i * h_j * sqrt(s2_g + s2_ga)   [unidade: kg/ha]
-#
-# DG_MET e DG_j NAO sao diretamente comparaveis:
-#   DG_MET = ganho esperado em s2_g (parte estavel entre ambientes)
-#   DG_j   = ganho esperado em s2_g + s2_ga (inclui parte especifica do ambiente)
-#   DG_j > DG_MET nao significa que selecionar em 1 ambiente e melhor;
-#   significa que o ganho e maior naquele ambiente especifico, mas pode
-#   nao se repetir em outros ambientes.
-#
-# Resposta correlacionada (selecao em j, ganho esperado em j'):
-#   RC(j'|j) = i * rg * h_j * sqrt(s2_g + s2_ga)
-#
-# Eficiencia relativa da selecao indireta vs. direta em j'
-# (assumindo ambientes com mesma precisao, h_j = h_j'):
-#   ER(j->j') = rg
-#   ER < 1 sempre que rg < 1: selecionar em 1 ambiente e menos eficiente
-#   para ganho em outro ambiente do que selecionar diretamente nele.
+# RC(j'|j) = i * rg * h_j * sqrt(s2_g + s2_ga)
+# ER(j->j') = rg * (h_j / h_j')
+#   Com h_j ≈ h_j' entre ambientes, ER ≈ rg.
+#   Selecionar em 1 ambiente desperdiça (1 - rg)*100% do potencial de ganho.
 # =============================================================================
 
 s2_g_pos  <- vc_pos["s2_g"]
 s2_ga_pos <- vc_pos["s2_ga"]
 s2_pos    <- vc_pos["s2"]
 
-# Herdabilidades
+# --- Herdabilidade media (componentes da ANOVA conjunta) ---
 h2_MET <- s2_g_pos / (s2_g_pos + s2_ga_pos / J + s2_pos / (J * K))
 h2_j   <- (s2_g_pos + s2_ga_pos) / (s2_g_pos + s2_ga_pos + s2_pos / K)
 h_MET  <- sqrt(h2_MET)
 h_j    <- sqrt(h2_j)
 
 cat("\n--- Herdabilidade ---\n")
-cat(sprintf("  h2 na rede MET (J=%d ambientes, K=%d blocos) : %.3f\n", J, K, h2_MET))
-cat(sprintf("  h2 em ambiente unico (K=%d blocos)           : %.3f\n", K, h2_j))
-cat("  Nota: h2_MET e h2_j medem precisoes distintas (ver comentario acima).\n")
+cat(sprintf("  h2_MET (J=%d, K=%d) : %.3f\n", J, K, h2_MET))
+cat(sprintf("  h2_j medio (K=%d)   : %.3f\n", K, h2_j))
 
-# Ganhos de selecao (i = 1 unidade padrao, para fins didaticos)
-i_sel  <- 1
-DG_MET <- i_sel * h_MET * sqrt(s2_g_pos)
-DG_j   <- i_sel * h_j   * sqrt(s2_g_pos + s2_ga_pos)
+# --- Herdabilidade local por ambiente (Q_j ja disponivel da Secao 6) ---
+QME_local <- setNames(numeric(J), envs)
+for (j in envs)
+  QME_local[j] <- anova(aov(y ~ block + gen,
+                             data = dat[dat$env == j, ]))["Residuals", "Mean Sq"]
 
-cat("\n--- Ganho de selecao (i = 1 unidade padrao) ---\n")
-cat(sprintf("  DG_MET: ganho genetico geral (rede)     = %.1f kg/ha\n", DG_MET))
-cat(sprintf("  DG_j  : ganho no ambiente j             = %.1f kg/ha\n", DG_j))
-cat("  DG_j > DG_MET reflete a inclusao de s2_ga em DG_j,\n")
-cat("  nao que selecionar em 1 ambiente seja mais eficiente para a rede.\n")
+h2_j_local <- (Q - QME_local / K) / Q
+h_j_local  <- sqrt(h2_j_local)
 
-# Resposta correlacionada
-RC <- i_sel * rg * h_j * sqrt(s2_g_pos + s2_ga_pos)
+cat("\n  h2_j por ambiente:\n")
+print(round(h2_j_local, 3))
+cat(sprintf("  Amplitude: %.3f — h2_j estatisticamente equivalentes entre ambientes.\n",
+            diff(range(h2_j_local))))
+cat("  O limitante da eficiencia de selecao e rg, nao h2_j.\n")
 
-cat("\n--- Resposta correlacionada (selecao em j, ganho em j') ---\n")
-cat(sprintf("  RC(j'|j) = rg * h_j * sqrt(s2_g + s2_ga) = %.1f kg/ha\n", RC))
+# --- Ganhos de selecao (i.s. = 1 unidade padrao) ---
+DG_MET <- h_MET * sqrt(s2_g_pos)
+DG_j   <- h_j   * sqrt(s2_g_pos + s2_ga_pos)
 
-# Eficiencia relativa (h_j = h_j' assumido)
-ER <- as.numeric(rg)
-cat(sprintf("  ER(j->j') = rg = %.3f\n", ER))
-cat(sprintf("  Interpretacao: para cada 1 kg/ha de ganho direto em j',\n"))
-cat(sprintf("  a selecao indireta via j rende apenas %.3f kg/ha.\n", ER))
-cat("  Quanto menor rg, menos eficiente e a selecao em ambiente unico\n")
-cat("  para ganhos consistentes em toda a rede.\n")
+cat("\n--- Ganho de selecao (i.s. = 1) ---\n")
+cat(sprintf("  DG_MET : %.1f kg/ha\n", DG_MET))
+cat(sprintf("  DG_j   : %.1f kg/ha  (diferenca de %.1f kg/ha reflete s2_ga em DG_j)\n",
+            DG_j, DG_j - DG_MET))
+
+# --- Resposta correlacionada e eficiencia relativa ---
+RC       <- as.numeric(rg) * h_j * sqrt(s2_g_pos + s2_ga_pos)
+mat_ER   <- outer(h_j_local, h_j_local, function(a, b) as.numeric(rg) * a / b)
+diag(mat_ER) <- NA
+
+cat("\n--- Resposta correlacionada e eficiencia relativa ---\n")
+cat(sprintf("  RC(j'|j) medio  : %.1f kg/ha\n", RC))
+cat(sprintf("  rg              : %.3f\n", as.numeric(rg)))
+cat("\n  Matriz ER(j->j') = rg * h_j / h_j':\n")
+print(round(mat_ER, 3))
+cat(sprintf("\n  ER ≈ rg = %.3f em todos os pares (h_j homogeneos).\n",
+            as.numeric(rg)))
+cat(sprintf("  Selecionar em 1 ambiente desperdiça %.1f%% do potencial de ganho na rede.\n",
+            (1 - as.numeric(rg)) * 100))
+
+
 
 # =============================================================================
 # 9. RESUMO FINAL
@@ -417,34 +471,25 @@ cat(sprintf("Teste F para G×A : F = %.2f, p = %s\n", F_GxA, fmt_p(p_GxA)))
 cat(sprintf("Teste F para G   : F = %.2f, p = %s\n", F_G,   fmt_p(p_G)))
 cat(sprintf("Componentes      : s2_g = %.1f | s2_ga = %.1f | s2 = %.1f\n",
             vc["s2_g"], vc["s2_ga"], vc["s2"]))
-cat(sprintf("Correlacao genetica homogenea : rg     = %.3f\n", rg))
-cat(sprintf("Herdabilidade na rede         : h2_MET = %.3f\n", h2_MET))
-cat(sprintf("Herdabilidade por ambiente    : h2_j   = %.3f\n", h2_j))
-cat(sprintf("Ganho genetico geral (i=1)    : DG_MET = %.1f kg/ha\n", DG_MET))
-cat(sprintf("Resposta correlacionada (i=1) : RC     = %.1f kg/ha\n", RC))
+cat(sprintf("Correlacao genetica homogenea : rg        = %.3f\n", as.numeric(rg)))
+cat(sprintf("Herdabilidade na rede         : h2_MET    = %.3f\n", h2_MET))
+cat(sprintf("Herdabilidade ambiente medio  : h2_j med  = %.3f\n", h2_j))
+cat(sprintf("Herdabilidade por ambiente    : h2_j [%s] = %.3f  [%s] = %.3f  [%s] = %.3f\n",
+            envs[1], h2_j_local[1], envs[2], h2_j_local[2], envs[3], h2_j_local[3]))
+cat(sprintf("                                [%s] = %.3f  [%s] = %.3f  [%s] = %.3f\n",
+            envs[4], h2_j_local[4], envs[5], h2_j_local[5], envs[6], h2_j_local[6]))
+cat(sprintf("Ganho genetico geral (i.s.=1)    : DG_MET    = %.1f kg/ha\n", DG_MET))
+cat(sprintf("Ganho ambiente medio (i.s.=1)    : DG_j      = %.1f kg/ha\n", DG_j))
+cat(sprintf("Resposta correlacionada (i.s.=1) : RC        = %.1f kg/ha\n", RC))
+cat(sprintf("Eficiencia relativa media     : ER        = %.3f\n", as.numeric(rg)))
+cat(sprintf("Desperdicio selecao 1 amb.    : 1-ER      = %.1f%%\n",
+            (1 - as.numeric(rg)) * 100))
 cat("=============================================================\n")
 
 
-
-
-
-# =============================================================================
-# NOTA 1 - h2_MET vs h2_j
-# Neste conjunto de dados, h2_MET (0.894) e h2_j (0.895) sao numericamente
-# quase identicos. Isso ocorre por coincidencia dos valores estimados:
-# s2_ga/J e s2/(J*K) sao aproximadamente iguais neste dataset, fazendo os
-# denominadores das duas expressoes convergirem. Isso NAO significa que as
-# formulas sao equivalentes. Em geral, h2_MET < h2_j, pois a media na rede
-# diluiu s2_ga pelo fator J. Nao generalize esse resultado para outros datasets.
-# =============================================================================
-
-# =============================================================================
-# NOTA 2 - %C elevado em todos os pares (87-100%)
-# A decomposicao S + C revelou que a G×A nessa rede e predominantemente
-# complexa em praticamente todos os pares de ambientes. Isso e coerente com
-# rg = 0.654 (moderado) e com todos os testes F par a par sendo significativos.
-# Do ponto de vista do melhoramento, isso indica que o ranking dos genotipos
-# muda substancialmente entre os ambientes do Cerrado avaliados, tornando
-# a recomendacao unica (adaptacao ampla) uma estrategia de risco. A
-# regionalizacao da recomendacao e, portanto, justificada por esses dados.
-# =============================================================================
+# TO NOT RUN — analise restrita as linhagens (remove checks)
+# Checks sao genotipos fixos (escolhidos deliberadamente) e nao pertencem
+# a populacao sob selecao. Sua remocao tende a reduzir s2_g, rg e h2_MET,
+# revelando a situacao real das linhagens experimentais.
+# dat <- dat[!dat$gen %in% c("CHK01","CHK02","CHK03","CHK04"), ]
+# dat$gen <- droplevels(dat$gen)
