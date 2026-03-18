@@ -2,6 +2,7 @@
 # GMP0164 - Biometria da Interacao Genotipos x Ambientes
 # Aula 2: ANOVA Conjunta e Componentes de Variancia em G×A
 # Dados: soy_MET.txt - 40 genotipos x 6 ambientes x 3 blocos (DBC)
+# Prof. Dr. Rafael Tassinari Resende
 #
 # Modelo assumido (Cruz, Regazzi e Carneiro, 2012 - caso c):
 #   Ambientes (A)                          : FIXOS
