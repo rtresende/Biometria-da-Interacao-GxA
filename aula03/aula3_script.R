@@ -13,7 +13,7 @@ library(ggplot2)
 # 0. DATA
 # -----------------------------------------------------------------------------
 
-dat <- read.table("soy_MET.txt", header = TRUE, sep = "\t")
+dat <- read.table("G:/Meu Drive/UFG/PPGGMP/BiometriaDaInteracaoGxA/aulas/simu_data/soy_MET.txt", header = TRUE, sep = "\t")
 dat$gen   <- factor(dat$gen)
 dat$env   <- factor(dat$env)
 dat$block <- factor(dat$block)
@@ -133,10 +133,12 @@ p_idx <- ggplot(idx_df, aes(x = reorder(lab, I_j), y = I_j, fill = Tipo)) +
         plot.title = element_text(face = "bold"))
 print(p_idx)
 
-cat("\n\n=== SECAO B: FINLAY E WILKINSON (1963) ===\n")
-cat("Modelo: y_ij = mu_i + b_i*I_j + e_ij\n")
-cat("Ajuste via lm(y ~ gen * I_j), no nivel de parcela.\n")
-cat("Como sum(I_j)=0: o intercepto de cada genotipo coincide com sua media.\n\n")
+# =============================================================================
+# SECAO B: FINLAY E WILKINSON (1963)
+# Modelo: y_ij = mu_i + b_i*I_j + e_ij\n
+# Ajuste via lm(y ~ gen * I_j), no nivel de parcela
+# Como sum(I_j)=0: o intercepto de cada genotipo coincide com sua media
+# =============================================================================
 
 dat$I_j <- I_j[as.character(dat$env)] #atribui o indice ambiental a cada parcela
 
