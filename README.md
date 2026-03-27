@@ -25,7 +25,7 @@ modelagem ambientômica para integração G×A e recomendação de genótipos.
 | 2 | 18/03 | ANOVA conjunta e componentes de variação |
 | 3 | 25/03 | Regressão de Finlay-Wilkinson |
 | 4 | 01/04 | Índices clássicos de adaptabilidade e estabilidade |
-| 5 | 08/04 | AMMI e GGE Biplot |
+| 5 | 08/04 | AMMI, GGE Biplot e Fator Analítico |
 | 6 | 15/04 | Modelos mistos I — BLUP multiambiente |
 | 7 | 22/04 | Modelos mistos II — Estruturas de variância |
 | 8 | 29/04 | Modelos mistos III — Índices via BLUP |
