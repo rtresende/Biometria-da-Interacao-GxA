@@ -2,6 +2,7 @@
 
 **Data:** 08 de abril de 2026  
 **Carga horária:** 4h
+
 **Prof. Dr. Saulo Chaves, ESALQ/USP**
 
 ## Conteúdo abordado
