@@ -259,78 +259,104 @@ ggplot(long_sh, aes(x=tipo, y=valor, group=gen)) +
 # 9. Extensao: incorporando parentesco (G = A) via lme4breeding
 # -----------------------------------------------------------------------------
 
-# Pedigree NC Design II — base R
+# Pedigree NC Design II
 ped_exp  <- unique(dat[dat$gen_type=="experimental", c("gen","female","male")])
-ped_fund <- data.frame(gen=c(unique(ped_exp$female), unique(ped_exp$male)),
-                       female=0, male=0)
-ped_chk  <- data.frame(gen=unique(dat$gen[dat$gen_type=="check"]),
-                       female=0, male=0)
+ped_fund <- data.frame(gen=c(unique(ped_exp$female), unique(ped_exp$male)), female=0, male=0)
+ped_chk  <- data.frame(gen=unique(dat$gen[dat$gen_type=="check"]),          female=0, male=0)
 ped      <- rbind(ped_fund, ped_exp, ped_chk)
 
-library(pedigreemm)
-ped2 <- pedigree(sire=ped$male, dam=ped$female, label=ped$gen)
-A    <- as.matrix(getA(ped2))
+A <- as.matrix(getA(pedigree(sire=ped$male, dam=ped$female, label=ped$gen)))
 heatmap(A)
-
-cat(sprintf("\nMatriz A: %dx%d | diag: %.2f-%.2f | off-diag: %.3f-%.3f\n",
+cat(sprintf("Matriz A: %dx%d | diag: %.2f-%.2f | off-diag: %.3f-%.3f\n",
             nrow(A), ncol(A), min(diag(A)), max(diag(A)),
             min(A[lower.tri(A)]), max(A[lower.tri(A)])))
 
-mod_A <- lmebreed(yield ~ -1 + trial + (1|gen) + (1|gen:trial) + (1|trial:block),
-                  relmat=list(gen=A), data=dat, REML=TRUE)
-cat("\n--- Componentes de variancia (G = A) ---\n")
-print(VarCorr(mod_A))
+# Matriz A ⊗ I_J para o termo gen:trial
+# Logica: dois niveis gen:trial so sao correlacionados se estiverem no mesmo ambiente
+dat$gen_trial <- paste(dat$gen, dat$trial, sep=":")
+gxt           <- levels(factor(dat$gen_trial))
+g_idx         <- sub(":.*", "", gxt)
+t_idx         <- sub(".*:", "", gxt)
 
-blup_A_raw  <- ranef(mod_A)$gen
-blup_A_df   <- data.frame(gen=rownames(blup_A_raw), blup_A=blup_A_raw[,1])
-comp2       <- merge(blup_gen_df[, c("gen","blup")], blup_A_df, by="gen")
-comp2$delta <- comp2$blup_A - comp2$blup
+A_GxA <- matrix(0, length(gxt), length(gxt), dimnames=list(gxt, gxt))
+for(i in seq_along(gxt))
+  for(j in seq_along(gxt))
+    if(t_idx[i]==t_idx[j]) A_GxA[i,j] <- A[g_idx[i], g_idx[j]]
 
-cat(sprintf("Correlacao BLUP(I) x BLUP(A): %.4f\n",
-            cor(comp2$blup, comp2$blup_A)))
-cat("Maior diferenca BLUP(A) - BLUP(I):\n")
-print(head(comp2[order(-abs(comp2$delta)), ], 10), digits=2)
+# Modelos
+mod_A  <- lmebreed(yield ~ -1 + trial + (1|gen) + (1|gen:trial) + (1|trial:block),
+                   relmat=list(gen=A),                  data=dat, REML=TRUE)
+mod_AK <- lmebreed(yield ~ -1 + trial + (1|gen) + (1|gen_trial) + (1|trial:block),
+                   relmat=list(gen=A, gen_trial=A_GxA), data=dat, REML=TRUE)
+
+cat("\n--- VarCorr: G=A, GxA=I ---\n");    print(VarCorr(mod_A))
+cat("\n--- VarCorr: G=A, GxA=A⊗I_J ---\n"); print(VarCorr(mod_AK))
+
+# Comparacao de BLUPs (genotipos)
+blup_A  <- data.frame(gen=rownames(ranef(mod_A)$gen),  blup_A =ranef(mod_A)$gen[,1])
+blup_AK <- data.frame(gen=rownames(ranef(mod_AK)$gen), blup_AK=ranef(mod_AK)$gen[,1])
+comp2   <- merge(merge(blup_gen_df[,c("gen","blup")], blup_A, by="gen"), blup_AK, by="gen")
+
+cat(sprintf("Corr BLUP(I)  x BLUP(A)  : %.4f\n", cor(comp2$blup,   comp2$blup_A)))
+cat(sprintf("Corr BLUP(I)  x BLUP(AK) : %.4f\n", cor(comp2$blup,   comp2$blup_AK)))
+cat(sprintf("Corr BLUP(A)  x BLUP(AK) : %.4f\n", cor(comp2$blup_A, comp2$blup_AK)))
 
 # -----------------------------------------------------------------------------
 # 10. Grafico comparativo — 4 paineis: medias vs modelos
-# X: ambientes (estressante -> favoravel) | Y: yield | linhas por genotipo
 # -----------------------------------------------------------------------------
- 
-# Valores ajustados por genotipo x ambiente (media dos blocos remove efeito de bloco)
-dat$fit1 <- fitted(mod1)
-dat$fit2 <- fitted(mod2)
-dat$fitA <- as.numeric(fitted(mod_A))
- 
-fit_ge <- aggregate(cbind(fit1, fit2, fitA) ~ gen + trial, dat, mean)
- 
-# Painel 1: medias raw
-med_long       <- as.data.frame(as.table(tab_ga))
+
+marg <- function(mod, dat, gen_term="gen", gxa_term="gen:trial") {
+  fe  <- fixef(mod);  re <- ranef(mod)
+  bg  <- setNames(re[[gen_term]][,1],  rownames(re[[gen_term]]))
+  bga <- setNames(re[[gxa_term]][,1],  rownames(re[[gxa_term]]))
+  mapply(function(g, tr) {
+    fe[paste0("trial",tr)] +
+      ifelse(g %in% names(bg),  bg[g], 0) +
+      ifelse(paste(g,tr,sep=":") %in% names(bga), bga[paste(g,tr,sep=":")], 0)
+  }, as.character(dat$gen), as.character(dat$trial))
+}
+
+marg2 <- function(mod, dat) {
+  fe  <- fixef(mod);  re <- ranef(mod)
+  bg  <- setNames(re[["gen_ran"]][,1],   rownames(re[["gen_ran"]]))
+  bga <- setNames(re[["gen:trial"]][,1], rownames(re[["gen:trial"]]))
+  mapply(function(g, tr, gtype) {
+    fe[paste0("trial",tr)] +
+      ifelse(gtype=="check", fe[paste0("chk_fix",g)], 0) +
+      bg[ifelse(gtype=="experimental", g, "1")] +
+      ifelse(paste(g,tr,sep=":") %in% names(bga), bga[paste(g,tr,sep=":")], 0)
+  }, as.character(dat$gen), as.character(dat$trial), dat$gen_type)
+}
+
+dat$fit1  <- marg(mod1,  dat)
+dat$fit2  <- marg2(mod2, dat)
+dat$fitAK <- marg(mod_AK, dat, gxa_term="gen_trial")
+fit_ge    <- aggregate(cbind(fit1,fit2,fitAK) ~ gen+trial, dat, mean)
+
+# Formato longo
+med_long        <- as.data.frame(as.table(tab_ga))
 names(med_long) <- c("gen","trial","valor")
 med_long        <- med_long[!is.na(med_long$valor), ]
-med_long$modelo <- "1. Medias raw"
- 
-# Paineis 2-4: valores ajustados
+
 mk <- function(df, col, lab)
   data.frame(gen=df$gen, trial=df$trial, valor=df[[col]], modelo=lab)
- 
+
 all_long <- rbind(
-  med_long[, c("gen","trial","valor","modelo")],
-  mk(fit_ge, "fit1", "2. Mod1 — G = I"),
-  mk(fit_ge, "fit2", "3. Mod2 — Checks fixos"),
-  mk(fit_ge, "fitA", "4. Mod_A — G = A")
+  mk(med_long, "valor",  "1. Medias raw"),
+  mk(fit_ge,   "fit1",   "2. Mod1 — G = I"),
+  mk(fit_ge,   "fit2",   "3. Mod2 — Checks fixos"),
+  mk(fit_ge,   "fitAK",  "4. Mod_AK — G = A")
 )
- 
-all_long$gen    <- as.character(all_long$gen)
 all_long$city   <- factor(city_order[match(all_long$trial, env_order)], levels=city_order)
-all_long$tipo   <- ifelse(all_long$gen %in% check_ids, "check", "experimental")
+all_long$tipo   <- ifelse(as.character(all_long$gen) %in% check_ids, "check", "experimental")
 all_long$modelo <- factor(all_long$modelo,
                           levels=c("1. Medias raw","2. Mod1 — G = I",
-                                   "3. Mod2 — Checks fixos","4. Mod_A — G = A"))
- 
+                                   "3. Mod2 — Checks fixos","4. Mod_AK — G = A"))
+
 ggplot(all_long, aes(x=city, y=valor, group=gen)) +
-  geom_line(data=all_long[all_long$tipo=="experimental", ],
+  geom_line(data=all_long[all_long$tipo=="experimental",],
             color="gray75", linewidth=0.3, alpha=0.6) +
-  geom_line(data=all_long[all_long$tipo=="check", ],
+  geom_line(data=all_long[all_long$tipo=="check",],
             aes(color=gen), linewidth=1.0) +
   facet_wrap(~modelo, nrow=1) +
   scale_color_manual(values=setNames(chk_colors, check_ids), name="Check") +
@@ -339,32 +365,30 @@ ggplot(all_long, aes(x=city, y=valor, group=gen)) +
        subtitle="Cinza: experimentais | Colorido: testemunhas comerciais",
        x="Ambiente (estressante -> favoravel)", y="Yield (kg/ha)") +
   theme_bw(base_size=11) +
-  theme(axis.text.x    = element_text(angle=30, hjust=1, size=7),
-        legend.text    = element_text(size=7),
-        strip.text     = element_text(face="bold"),
-        legend.position  = "bottom",
-        panel.grid.minor = element_blank())
+  theme(axis.text.x=element_text(angle=30, hjust=1, size=7),
+        legend.text=element_text(size=7), strip.text=element_text(face="bold"),
+        legend.position="bottom", panel.grid.minor=element_blank())
 
-# Pairs panel — comparacao par-a-par entre modelos
-# 1 ponto = 1 combinacao gen x ambiente
-
+# Pairs panel
 wide <- merge(
   data.frame(gen=as.character(med_long$gen), trial=as.character(med_long$trial),
              tipo=ifelse(med_long$gen %in% check_ids, "check", "experimental"),
              Medias=med_long$valor),
-  fit_ge[, c("gen","trial","fit1","fit2","fitA")],
+  fit_ge[, c("gen","trial","fit1","fit2","fitAK")],
   by=c("gen","trial"), all.x=TRUE
 )
-names(wide)[5:7] <- c("Mod1 G=I","Mod2 Chk-fix","Mod_A G=A")
+names(wide)[5:7] <- c("Mod1 G=I","Mod2 Chk-fix","Mod_AK G=A")
 
-pares <- list(c("Medias","Mod1 G=I"), c("Medias","Mod2 Chk-fix"), c("Medias","Mod_A G=A"),
-              c("Mod1 G=I","Mod2 Chk-fix"), c("Mod1 G=I","Mod_A G=A"),
-              c("Mod2 Chk-fix","Mod_A G=A"))
+pares <- list(c("Medias","Mod1 G=I"), c("Medias","Mod2 Chk-fix"),
+              c("Medias","Mod_AK G=A"),
+              c("Mod1 G=I","Mod2 Chk-fix"),
+              c("Mod1 G=I","Mod_AK G=A"),
+              c("Mod2 Chk-fix","Mod_AK G=A"))
 
 pl <- do.call(rbind, lapply(pares, function(p)
   data.frame(xlab=p[1], ylab=p[2], x=wide[[p[1]]], y=wide[[p[2]]],
              tipo=wide$tipo, gen=wide$gen)))
-pl$panel <- factor(paste(pl$xlab, "vs", pl$ylab), levels=unique(paste(pl$xlab,"vs",pl$ylab)))
+pl$panel <- factor(paste(pl$xlab,"vs",pl$ylab), levels=unique(paste(pl$xlab,"vs",pl$ylab)))
 
 ggplot(pl, aes(x=x, y=y)) +
   geom_abline(slope=1, intercept=0, linetype="dashed", color="gray40", linewidth=0.5) +
@@ -379,8 +403,6 @@ ggplot(pl, aes(x=x, y=y)) +
   theme(panel.grid.minor=element_blank(), strip.text=element_text(size=8, face="bold"),
         legend.position="bottom", legend.direction="horizontal")
 
-
-
 # -----------------------------------------------------------------------------
 # 11. Sumario final
 # -----------------------------------------------------------------------------
@@ -391,11 +413,63 @@ cat("=============================================================\n")
 cat(sprintf("Genotipos: %d | Ambientes: %d | Obs: %d (%.1f%% missing)\n",
             I, J, nrow(dat), 100*(1-nrow(dat)/(I*J*K))))
 cat(sprintf("V_GxA / V_G = %.2f | H2 (medias) = %.3f\n", s2ga/s2g, H2))
-cat(sprintf("Melhor BLUP(I) : %s (%.0f kg/ha) | acc = %.3f\n",
+cat(sprintf("Melhor BLUP(I)  : %s (%.0f kg/ha) | acc = %.3f\n",
             blup_gen_df$gen[1], blup_gen_df$blup[1], blup_gen_df$acc[1]))
-cat(sprintf("Melhor BLUP(A) : %s (%.0f kg/ha)\n",
-            blup_A_df$gen[which.max(blup_A_df$blup_A)],
-            max(blup_A_df$blup_A)))
-cat(sprintf("Corr BLUP(I)/BLUP(A) = %.4f\n",
-            cor(comp2$blup, comp2$blup_A)))
+cat(sprintf("Melhor BLUP(AK) : %s (%.0f kg/ha)\n",
+            cmp_pat$gen[which.max(cmp_pat$blup_AK)],
+            max(cmp_pat$blup_AK)))
+cat(sprintf("Corr BLUP(I) x BLUP(AK) : %.4f\n",
+            cor(cmp_pat$blup_1, cmp_pat$blup_AK)))
 cat("=============================================================\n")
+
+
+
+# -----------------------------------------------------------------------------
+# 12. [PLUS] Parentesco (tende) a puxar individuos para a media da familia paterna (Mod1 vs Mod_AK)
+# -----------------------------------------------------------------------------
+
+# BLUPs experimentais — mod1 e mod_AK
+re1   <- ranef(mod1);   reAK  <- ranef(mod_AK)
+b1    <- setNames(re1$gen[,1],   rownames(re1$gen))
+bAK   <- setNames(reAK$gen[,1], rownames(reAK$gen))
+
+fam_pat <- unique(dat[dat$gen_type=="experimental", c("gen","male")])
+
+cmp_pat <- data.frame(
+  gen    = fam_pat$gen,
+  male   = fam_pat$male,
+  blup_1 = b1[as.character(fam_pat$gen)],
+  blup_AK= bAK[as.character(fam_pat$gen)],
+  n_amb  = amb_por_gen[as.character(fam_pat$gen)]
+)
+
+fam1_pat  <- aggregate(blup_1  ~ male, cmp_pat, mean); names(fam1_pat)[2]  <- "fam1"
+famAK_pat <- aggregate(blup_AK ~ male, cmp_pat, mean); names(famAK_pat)[2] <- "famAK"
+
+bar_df <- rbind(
+  data.frame(male=fam1_pat$male,  blup=fam1_pat$fam1,   modelo="Mod1 — G=I"),
+  data.frame(male=famAK_pat$male, blup=famAK_pat$famAK, modelo="Mod_AK — G=A")
+)
+bar_df$modelo <- factor(bar_df$modelo, levels=c("Mod1 — G=I","Mod_AK — G=A"))
+
+pt_df <- rbind(
+  data.frame(male=cmp_pat$male, blup=cmp_pat$blup_1,  n_amb=cmp_pat$n_amb, modelo="Mod1 — G=I"),
+  data.frame(male=cmp_pat$male, blup=cmp_pat$blup_AK, n_amb=cmp_pat$n_amb, modelo="Mod_AK — G=A")
+)
+pt_df$modelo <- factor(pt_df$modelo, levels=c("Mod1 — G=I","Mod_AK — G=A"))
+
+ggplot(bar_df, aes(x=male)) +
+  geom_hline(yintercept=0, linewidth=0.4, color="gray40") +
+  geom_col(aes(y=blup, fill=modelo),
+           position=position_dodge(0.75), width=0.7, alpha=0.3) +
+  geom_point(data=pt_df, aes(y=blup, color=n_amb, group=modelo),
+             position=position_dodge(0.75), size=2.5, alpha=0.85) +
+  scale_fill_manual(values=c("Mod1 — G=I"="#457B9D","Mod_AK — G=A"="#2A9D8F"), name=NULL) +
+  scale_color_gradientn(colors=c("#d73027","#fee08b","#1a9850"),
+                        name="N ambientes", breaks=2:6) +
+  labs(title="BLUPs por familia paterna — Mod1 vs Mod_AK",
+       subtitle="Barra = media familiar | Pontos = individuos | Cor = n ambientes observados",
+       x="Familia paterna", y="BLUP (kg/ha)") +
+  theme_bw(base_size=11) +
+  theme(axis.text.x=element_text(angle=40, hjust=1, size=8),
+        legend.position="right", panel.grid.minor=element_blank())
