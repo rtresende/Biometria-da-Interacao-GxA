@@ -7,7 +7,7 @@ Carga horária: 4h
 
 - Reformulação da G×A em termos da matriz genética entre ambientes, G_e
 - Produto de Kronecker na notação do modelo misto multiambiente
-- Estruturas VCOV para G_e: ID, DIAG, CS, CSH, UN, AR(1) e FA
+- Estruturas VCOV para G: ID, DIAG, CS, CSH, UN, AR(1) e FA
 - Interpretação biométrica de variâncias, covariâncias e correlações genéticas entre ambientes
 - Equivalência entre o modelo clássico g + ga e a estrutura CS
 - Critérios de escolha de estrutura: plausibilidade biométrica, estabilidade numérica e ajuste
