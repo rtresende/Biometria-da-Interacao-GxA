@@ -19,3 +19,7 @@ Carga horária: 4h
 - 📄 `Biometria_da_Interação_GxA_GMP0164_aula7.pdf` — roteiro teórico da aula
 - 💾 `script_GMP0164_aula7.R` — script utilizado na aula
 - 📊 `maize_safrinha_MET.txt` — conjunto de dados utilizado na prática
+
+Bonus Tracks:
+- `vcov_FA.pdf` — nota complementar sobre a estrutura fator analítica (FA): formulação, interpretação dos símbolos, diagonal, fora da diagonal e exemplo numérico
+- `vcov_g+ga_x_CS.pdf` — nota complementar sobre a derivação da matriz \( \mathbf{G} \) no modelo \( g + ga \) e sua equivalência com a estrutura CS
