@@ -2,6 +2,7 @@
 
 **Data:** [29 de abril de 2026]  
 **Carga horária:** [4h]
+
 **Responsável pela aula:** Prof. Dr. Tiago Olivoto (UFSC)
 
 ## Conteúdo abordado
