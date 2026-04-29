@@ -4,7 +4,9 @@
 **Programa:** Pós-Graduação em Genética e Melhoramento de Plantas — PPGGMP/UFG  
 **Professor:** Prof. Dr. Rafael Tassinari Resende  
 **Semestre:** 2026/1 (início: março/2026)  
-**Carga horária:** 64h | 4 créditos  
+**Carga horária:** 64h | 4 créditos
+
+**Professores convidados:** Saulo Chaves (ESALQ/USP) - aula5 | Tiago Olivoto (UFSC) - aula 8 | Gustavo Marcatti (UFSJ) - aulas 11 e 13.
 
 ---
 
