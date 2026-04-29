@@ -1,0 +1,204 @@
+---
+title: "WAASB and WAASBY indexes"
+author: Tiago Olivoto
+institute: LEMGAD/NEPEM/UFSC
+date: last-modified
+date-format: "DD/MM/YYYY"
+lang: pt
+format: 
+  html:
+    theme: 
+      light: lux
+      dark: darkly
+    toc: true
+    toc-location: left
+    toc-title: "Sumário"
+    number-sections: true
+    code-fold: true
+    code-summary: "Exibir Código"
+    code-tools: true
+    code-copy: true
+    self-contained: true
+    grid:
+      sidebar-width: 250px
+      body-width: 900px
+execute:
+  warning: false
+  message: false
+---
+
+# Pacotes
+
+```{r}
+library(lme4)
+library(tidyverse)
+library(rio)
+library(lmerTest)
+library(broom.mixed)
+library(ggrepel)
+library(metan)
+
+```
+
+
+
+# Dados
+```{r}
+df <- import("https://raw.githubusercontent.com/rtresende/Biometria-da-Interacao-GxA/refs/heads/main/data/soy_MET.txt")
+
+
+```
+
+# Exploração
+```{r}
+ggplot(df, aes(env, y)) +
+  geom_boxplot()
+
+# Heatmap
+ge_plot(df, env, gen, y)
+```
+
+# Modelo Misto
+```{r}
+mod <- lmer(y ~ (1|gen) + (1|gen:env) + env/block, data = df)
+ranova(mod)
+# criar matriz dos efeitos da interação
+gemat <- 
+  ranef(mod) |> 
+  pluck(1) |> 
+  rownames_to_column("term") |> 
+  rename(ybar = 2) |> 
+  separate_wider_delim(term, delim = ":", names = c("gen", "env")) |> 
+  pivot_wider(names_from = env, values_from = ybar) |> 
+  column_to_rownames("gen") |> 
+  as.matrix()
+
+
+```
+
+# Decomposição por valor singular
+```{r}
+s <- svd(gemat)
+d <- s$d[1:6]
+u <- s$u[, 1:6]
+v <- s$v[, 1:6]
+# Retornar a matriz original
+
+prop <- d^2 / sum(d^2)
+u %*% diag(d) %*% t(v)
+
+# Escores
+eg <- u %*% sqrt(diag(d)) |> 
+  as.data.frame() |> 
+  mutate(tipo = "gen",
+         code = rownames(gemat))
+
+ea <- v %*% sqrt(diag(d)) |> 
+  as.data.frame() |> 
+  mutate(tipo = "env",
+         code = colnames(gemat))
+```
+
+
+# Biplot
+```{r}
+escores <- bind_rows(eg, ea)
+colnames(escores) <- c(paste0("IPCA", 1:6), "tipo", "code")
+
+ggplot(escores, aes(IPCA1, IPCA2)) +
+  geom_point(aes(color = tipo)) +
+  geom_segment(aes(x = 0, y = 0, xend = IPCA1, yend = IPCA2),
+               arrow = arrow(),
+               data = escores |> filter(tipo == "env")) +
+  geom_text_repel(aes(label = code))
+```
+
+
+# Índice WAASB
+```{r}
+sum(abs(c(3.20824260,  -4.3905684,   0.29417954, -14.39473090,   3.48933697, 0.43620530)) * prop)
+
+prop
+
+waasb <- 
+escores |> 
+  rowwise() |> 
+  mutate(
+    waasb = weighted.mean(abs(c_across(IPCA1:IPCA6)), w = prop)
+  )
+
+# BIPLOT
+dfgen <- 
+df |> 
+  group_by(gen) |> 
+  summarise(rendimento = mean(y)) |> 
+  rename(code = 1)
+dfenv <- 
+df |> 
+  group_by(env) |> 
+  summarise(rendimento = mean(y)) |> 
+  rename(code = 1)
+
+waasb <- waasb |> left_join(bind_rows(dfenv, dfgen)) 
+
+pwaasb <- 
+ggplot(waasb, aes(rendimento, waasb)) +
+  geom_point(aes(color = tipo)) +
+  geom_vline(aes(xintercept = mean(rendimento))) +
+  geom_hline(aes(yintercept = mean(waasb))) +
+  geom_text_repel(aes(label = code), size = 3) +
+  theme_minimal() +
+  labs(x = "Rendimento",
+       y = "Média ponderada dos escores absolutos")
+```
+
+```{r}
+res <- 
+df |> 
+  group_by(env) |> 
+  gamem(gen, block, y)
+```
+
+# WAASBY
+```{r}
+resca_vec <- function(x, ...){
+  resca(values = x, ...)
+}
+
+dfgenwaasb <- 
+waasb |> 
+  filter(tipo == "gen") 
+
+dfgenwaasb$waasb_res <- resca(values = dfgenwaasb$waasb, new_max = 0, new_min = 100)
+dfgenwaasb$rend_res <- resca(values = dfgenwaasb$rendimento, new_max = 100, new_min = 0)
+
+dfgenwaasb <- 
+dfgenwaasb |> 
+  mutate(
+    waasby = (waasb_res * 35 + rend_res * 65) / 100
+  )
+
+pw <- 
+ggplot(dfgenwaasb, aes(waasby, reorder(code, waasby), group = 1)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal()
+  
+
+pwaasb + pw
+```
+
+# Usando o pacote metan
+```{r}
+mod_w <- waasb(df, env, gen, block, y)
+plot_scores(mod_w)
+plot_scores(mod_w, type = 2)
+plot_scores(mod_w, type = 3)
+```
+
+
+# Índices Deon
+```{r}
+blup_indexes(mod_w)
+```
+
