@@ -1,0 +1,337 @@
+# =============================================
+# GMP0164 - Biometria da Interacao G x A
+# Aula 09: Random Regression and Reaction Norms
+# Data: Maize safrinha MET 2025
+#       70 genotypes, 6 environments, 3 blocks
+#       Unbalanced genotype representation
+#       Response: yield_kg_ha
+# Prof. Dr. Rafael Tassinari Resende
+# =============================================
+
+# Goal:
+# Fit a random regression model for GxE using the
+# phenotypic environment mean as environmental gradient.
+
+# Model:
+# yield_ijk = mu + trial_j + block_k(j) + u0_i + u1_i * env_index_j + e_ijk
+# lme4: yield ~ trial + (1 | trial:block) + (1 + env_index | gen)
+
+# ---------------------------------------------
+# 1. Load packages and data
+# ---------------------------------------------
+
+rm(list=ls());gc()
+library(lme4); library(ggplot2)
+library(dplyr)
+
+dat <- read.table("maize_safrinha_MET.txt", header = TRUE, sep = "\t") # Load MET data.
+
+dat <- dat %>%
+  mutate(
+    yield = yield_kg_ha,
+    maturity = days_to_maturity,
+    gen = factor(gen),
+    trial = factor(trial),
+    block = factor(block),
+    gen_type = factor(gen_type),
+    city = factor(city),
+    state = factor(state),
+    env_block = interaction(trial, block, drop = TRUE)) # Prepare variables used in the lesson.
+
+str(dat) # Check data structure.
+
+# ---------------------------------------------
+# 2. Basic dimensions and unbalance
+# ---------------------------------------------
+
+I <- nlevels(dat$gen); J <- nlevels(dat$trial); K <- nlevels(dat$block) # Count MET dimensions.
+
+env_per_gen <- dat %>%
+  group_by(gen, gen_type) %>%
+  summarise(n_env = n_distinct(trial), n_obs = n(), .groups = "drop") %>%
+  mutate(gen = as.character(gen)) # Count environments and observations per genotype.
+
+gen_per_env <- dat %>%
+  group_by(trial, city, state) %>%
+  summarise(n_gen = n_distinct(gen), n_obs = n(), .groups = "drop") %>%
+  arrange(trial) # Count genotypes and observations per environment.
+
+cat("\nDimensions:", I, "genotypes |", J, "environments |",
+    K, "blocks |", nrow(dat), "observations\n") # Print the main MET size.
+cat("\nGenotype types:\n"); print(table(dat$gen_type)) # Check checks and experimental genotypes.
+cat("\nEnvironments per genotype:\n"); print(table(env_per_gen$n_env)) # Show genotype imbalance.
+cat("\nGenotypes per environment:\n"); print(gen_per_env) # Show environment imbalance.
+
+# ---------------------------------------------
+# 3. Environmental index
+# ---------------------------------------------
+
+env_index <- dat %>%
+  group_by(trial, city, state) %>%
+  summarise(
+    env_mean = mean(yield),
+    n_gen = n_distinct(gen),
+    n_obs = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    I_env = env_mean - mean(env_mean),
+    env_index = as.numeric(scale(env_mean))
+  ) %>%
+  arrange(env_index) # Build the phenotypic environmental gradient.
+
+dat <- dat %>%
+  left_join(env_index %>% select(trial, env_mean, I_env, env_index),
+            by = "trial") # Attach the environmental index to each plot observation.
+
+cat("\nEnvironment means and environmental index:\n")
+print(env_index) # Inspect environment ranking along the gradient.
+
+# ---------------------------------------------
+# 4. Genotype x environment means
+# ---------------------------------------------
+
+means_ge <- dat %>%
+  group_by(gen, gen_type, trial, city, env_index) %>%
+  summarise(y_mean = mean(yield), .groups = "drop") # Compute genotype means within environments.
+
+ggplot(means_ge, aes(env_index, y_mean, group = gen)) +
+  geom_line(color = "gray70", linewidth = 0.35, alpha = 0.7) +
+  geom_point(color = "gray45", size = 1.0, alpha = 0.7) +
+  theme_bw() +
+  labs(x = "Environmental index",
+       y = "Mean yield (kg/ha)",
+       title = "Raw genotype responses over the environmental gradient")
+# Visualize raw responses before fitting the mixed model.
+
+# ---------------------------------------------
+# 5. Manual Z matrix example
+# ---------------------------------------------
+
+demo_gen <- env_per_gen %>%
+  arrange(desc(n_env), gen) %>%
+  group_by(n_env) %>%
+  slice_head(n = 1) %>%
+  ungroup() %>%
+  arrange(desc(n_env)) %>%
+  slice_head(n = 4) %>%
+  pull(gen) # Select genotypes with different levels of environmental coverage.
+
+demo <- dat %>%
+  filter(as.character(gen) %in% demo_gen) %>%
+  group_by(gen, trial, env_index) %>%
+  summarise(y_mean = mean(yield), .groups = "drop") %>%
+  arrange(gen, trial) # Build a small genotype-by-environment example for Z.
+
+build_Zu <- function(gen, x) {
+  gen <- factor(gen); glev <- levels(gen)
+  Z <- matrix(0, length(gen), 2 * length(glev))
+  colnames(Z) <- as.vector(rbind(paste0(glev, "_u0"), paste0(glev, "_u1")))
+  for (r in seq_along(gen)) {
+    j <- match(as.character(gen[r]), glev)
+    Z[r, 2 * j - 1] <- 1
+    Z[r, 2 * j] <- x[r]
+  }
+  Z
+} # Build Z with one intercept and one slope column per genotype.
+
+Z_demo <- build_Zu(demo$gen, demo$env_index) # Create the manual random-regression Z matrix.
+
+Z_show <- cbind(as.data.frame(demo[, c("gen", "trial", "env_index")]),
+                round(Z_demo, 3)) # Combine observation IDs and Z columns.
+
+cat("\nManual Z matrix for a small subset:\n")
+print(Z_show, row.names = FALSE) # Show how intercept and slope columns enter Z.
+
+# ---------------------------------------------
+# 6. Fit random regression model
+# ---------------------------------------------
+
+ctrl <- lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)) # Set optimizer control.
+
+mod_rr <- lmer(
+  yield ~ trial + (1 | env_block) + (1 + env_index | gen),
+  data = dat, REML = TRUE, control = ctrl) # Fit random intercept and slope by genotype.
+
+print(mod_rr) # Inspect model fit.
+print(VarCorr(mod_rr), comp = "Variance") # Inspect variance components.
+cat("\nSingular fit:", isSingular(mod_rr), "\n") # Check singularity.
+
+# ---------------------------------------------
+# 7. Random coefficient VCOV
+# ---------------------------------------------
+
+Gu <- as.matrix(VarCorr(mod_rr)$gen) # Extract the genotype random-coefficient VCOV matrix.
+sigma2_e <- sigma(mod_rr)^2 # Extract residual variance.
+
+sigma2_u0 <- Gu["(Intercept)", "(Intercept)"]
+sigma2_u1 <- Gu["env_index", "env_index"]
+sigma_u01 <- Gu["(Intercept)", "env_index"]
+cor_u01 <- sigma_u01 / sqrt(sigma2_u0 * sigma2_u1) # Compute correlation between intercept and slope.
+
+cat("\nG_u matrix:\n")
+print(round(Gu, 3)) # Print VCOV matrix for reaction norm coefficients.
+
+cat("\nRandom coefficient components:\n")
+cat(sprintf("  Var(u0)    : %.3f\n", sigma2_u0))
+cat(sprintf("  Var(u1)    : %.3f\n", sigma2_u1))
+cat(sprintf("  Cov(u0,u1) : %.3f\n", sigma_u01))
+cat(sprintf("  Cor(u0,u1) : %.3f\n", cor_u01))
+cat(sprintf("  Var(e)     : %.3f\n", sigma2_e)) # Summarize random-regression variance components.
+
+# ---------------------------------------------
+# 8. Genotype BLUPs
+# ---------------------------------------------
+
+blup_gen <- ranef(mod_rr)$gen %>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("gen") %>%
+  rename(u0 = `(Intercept)`, u1 = env_index) %>%
+  left_join(env_per_gen, by = "gen") # Extract genotype intercept and slope BLUPs.
+
+blup_rank <- blup_gen %>%
+  select(gen, gen_type, n_env, u0, u1) %>%
+  mutate(across(c(u0, u1), ~ round(.x, 2))) # Prepare a compact BLUP table.
+
+cat("\nTop genotypes by random intercept:\n")
+print(head(arrange(blup_rank, desc(u0)), 10)) # Genotypes with high predicted performance at mean environment.
+
+cat("\nTop genotypes by random slope:\n")
+print(head(arrange(blup_rank, desc(u1)), 10)) # Genotypes with high response to favorable environments.
+
+cat("\nLowest genotypes by random slope:\n")
+print(head(arrange(blup_rank, u1), 10)) # Genotypes with low or negative environmental sensitivity.
+
+# ---------------------------------------------
+# 9. Genetic variance over the gradient
+# ---------------------------------------------
+
+x_grid <- seq(min(dat$env_index), max(dat$env_index), length.out = 100) # Create gradient grid.
+
+var_curve <- data.frame(env_index = x_grid) %>%
+  mutate(var_g = sigma2_u0 + 2 * env_index * sigma_u01 +
+           env_index^2 * sigma2_u1) # Compute genetic variance along the gradient.
+
+ggplot(var_curve, aes(env_index, var_g)) +
+  geom_line(linewidth = 1) +
+  theme_bw() +
+  labs(x = "Environmental index",
+       y = "Genetic variance",
+       title = "Genetic variance along the environmental gradient")
+# Plot how genetic variance changes with the environmental index.
+
+# ---------------------------------------------
+# 10. Reaction norms
+# ---------------------------------------------
+
+sel_info <- bind_rows(
+  blup_gen %>% filter(gen_type == "check") %>%
+    arrange(desc(u0)) %>% slice_head(n = 2) %>% mutate(selection = "check"),
+  blup_gen %>% filter(gen_type != "check") %>%
+    arrange(desc(u0)) %>% slice_head(n = 2) %>% mutate(selection = "high u0"),
+  blup_gen %>% filter(gen_type != "check") %>%
+    arrange(desc(u1)) %>% slice_head(n = 2) %>% mutate(selection = "high u1"),
+  blup_gen %>% filter(gen_type != "check") %>%
+    arrange(u1) %>% slice_head(n = 2) %>% mutate(selection = "low u1")
+) %>%
+  distinct(gen, .keep_all = TRUE) # Select contrasting genotypes for interpretation.
+
+sel_gen <- sel_info$gen # Store selected genotype names.
+
+ggplot(blup_gen, aes(u0, u1)) +
+  geom_hline(yintercept = 0, linetype = 2, color = "gray55") +
+  geom_vline(xintercept = 0, linetype = 2, color = "gray55") +
+  geom_point(color = "gray70", alpha = 0.65) +
+  geom_point(data = sel_info, aes(color = selection), size = 2.5) +
+  geom_text(data = sel_info, aes(label = gen, color = selection),
+            hjust = -0.15, size = 3, show.legend = FALSE) +
+  theme_bw() +
+  labs(x = "Random intercept, u0",
+       y = "Random slope, u1",
+       color = "Selected group",
+       title = "Random coefficients of reaction norms")
+# Show selected genotypes inside the full distribution of random coefficients.
+
+curves_all <- expand.grid(gen = blup_gen$gen, env_index = x_grid,
+                          stringsAsFactors = FALSE) %>%
+  left_join(blup_gen %>% select(gen, gen_type, u0, u1), by = "gen") %>%
+  mutate(g_hat = u0 + u1 * env_index,
+         selected = gen %in% sel_gen) # Compute reaction norms for all genotypes.
+
+curves_sel <- curves_all %>% filter(selected) # Keep highlighted reaction norms.
+
+curve_lab <- curves_sel %>%
+  group_by(gen) %>%
+  slice_max(env_index, n = 1, with_ties = FALSE) %>%
+  ungroup() # Get right-side label positions.
+
+x_lim <- range(x_grid); x_lim[2] <- x_lim[2] + 0.18 * diff(x_lim) # Add room for curve labels.
+
+ggplot() +
+  geom_hline(yintercept = 0, linetype = 2, color = "gray55") +
+  geom_line(data = curves_all,
+            aes(env_index, g_hat, group = gen),
+            color = "gray75", linewidth = 0.35, alpha = 0.55) +
+  geom_line(data = curves_sel,
+            aes(env_index, g_hat, group = gen, color = gen_type),
+            linewidth = 0.95, alpha = 0.95) +
+  geom_text(data = curve_lab,
+            aes(env_index, g_hat, label = gen, color = gen_type),
+            hjust = -0.05, size = 3, show.legend = FALSE) +
+  coord_cartesian(xlim = x_lim, clip = "off") +
+  theme_bw() +
+  theme(plot.margin = margin(5.5, 35, 5.5, 5.5)) +
+  labs(x = "Environmental index",
+       y = "Predicted genotypic deviation",
+       color = "Genotype type",
+       title = "Reaction norms for selected genotypes")
+# Plot all reaction norms in the background and highlight contrasting genotypes.
+
+# ---------------------------------------------
+# 11. Z matrix from lme4
+# ---------------------------------------------
+
+Z_lme4 <- getME(mod_rr, "Z") # Extract the full sparse random-effects design matrix.
+cnms_lme4 <- getME(mod_rr, "cnms") # Extract random-effect column names by model term.
+
+cat("\nRandom-effect columns by term:\n")
+print(cnms_lme4) # Identify random intercept and slope columns.
+
+cat("\nZ matrix from lme4:\n")
+cat("  Rows   :", nrow(Z_lme4), "\n")
+cat("  Columns:", ncol(Z_lme4), "\n")
+cat("  Class  :", class(Z_lme4), "\n") # Summarize the full Z matrix.
+
+cat("\nSmall Z preview:\n")
+print(as.matrix(Z_lme4[1:min(12, nrow(Z_lme4)),
+                       1:min(12, ncol(Z_lme4))])) # Preview a small part of Z.
+
+# ---------------------------------------------
+# 12. Student tasks
+# ---------------------------------------------
+
+cat("\nStudent tasks:\n")
+cat("1. Identify the least and most favorable environments.\n")
+cat("2. Interpret Var(u0), Var(u1), and Cov(u0,u1).\n")
+cat("3. List genotypes with high intercepts and high slopes.\n")
+cat("4. Compare a check and an experimental genotype.\n")
+cat("5. Explain how unbalance affects slope prediction.\n")
+cat("6. Interpret the Z matrix structure.\n") # Keep the interpretation focused on reaction norms.
+
+# ---------------------------------------------
+# 13. Final summary
+# ---------------------------------------------
+
+cat("\n=============================================\n")
+cat("FINAL SUMMARY\n")
+cat("=============================================\n")
+cat(sprintf("Genotypes             : %d\n", I))
+cat(sprintf("Environments          : %d\n", J))
+cat(sprintf("Blocks                : %d\n", K))
+cat(sprintf("Observations          : %d\n", nrow(dat)))
+cat(sprintf("Var(random intercept) : %.2f\n", sigma2_u0))
+cat(sprintf("Var(random slope)     : %.2f\n", sigma2_u1))
+cat(sprintf("Cov(intercept,slope)  : %.2f\n", sigma_u01))
+cat(sprintf("Cor(intercept,slope)  : %.3f\n", cor_u01))
+cat(sprintf("Residual variance     : %.2f\n", sigma2_e))
+cat("=============================================\n") # Summarize the main outputs of the lesson.
