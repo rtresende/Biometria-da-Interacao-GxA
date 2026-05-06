@@ -5,7 +5,7 @@
 
 ## Conteúdo abordado
 
-- Recapitulação da ANOVA conjunta, Finlay–Wilkinson, Eberhart–Russell e modelos mistos para G×A
+- Brevíssima recapitulação da ANOVA conjunta, Finlay–Wilkinson, Eberhart–Russell e modelos mistos para G×A
 - Construção do índice ambiental a partir da média fenotípica dos ambientes
 - Transição da regressão de Finlay–Wilkinson para a regressão aleatória
 - Intercepto e inclinação como efeitos aleatórios de genótipos
