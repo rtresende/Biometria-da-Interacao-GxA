@@ -1,7 +1,7 @@
 # Aula 11 — Sistemas de Informações Geográficas (SIG) aplicado ao melhoramento genético
 
 Data: 20/05/2026  
-Carga horária: [preencher]
+Carga horária: 4h
 
 Professor convidado: Prof. Gustavo Eduardo Marcatti — UFSJ
 
