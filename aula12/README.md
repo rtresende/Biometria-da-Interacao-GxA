@@ -27,7 +27,7 @@ Carga horária: 4h
 ## Material
 
 - `Biometria_da_Interação_GxA_GMP0164_aula12.pdf` — roteiro teórico da aula
-- `script_GMP0164_aula12.R` — script utilizado na atividade prática
+- https://github.com/Enviromics/TPE-mapping — script utilizado na atividade prática
 
 ## Atividade
 
