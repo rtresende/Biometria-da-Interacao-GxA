@@ -2,6 +2,7 @@
 
 Data: 03 de junho de 2026  
 Carga horária: 4h
+
 Professor convidado: Gustavo Marcatti (UFSJ)
 
 ## Conteúdo abordado
