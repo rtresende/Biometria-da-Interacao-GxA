@@ -1,4 +1,4 @@
-# Aula 13 — Obtenção de covariáveis ambientais para ambientipagem
+# Aula 13 — Obtenção de covariáveis ambientais (ambientipagem)
 
 Data: 03 de junho de 2026  
 Carga horária: 4h
