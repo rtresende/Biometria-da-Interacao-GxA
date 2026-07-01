@@ -68,6 +68,6 @@ install.packages(c(
 ## Licença
 
 Material licenciado sob [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/).  
-Uso acadêmico livre com atribuição. Uso comercial não permitido.
+Uso acadêmico livre com atribuição. Uso comercial NÃO permitido.
 
 © 2026 Rafael Tassinari Resende — Escola de Agronomia / UFG
