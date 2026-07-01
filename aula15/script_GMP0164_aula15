@@ -12,6 +12,7 @@
 
 suppressPackageStartupMessages({
   library(lme4)
+  library(rrBLUP)
   library(ggplot2)
 })
 
@@ -66,7 +67,7 @@ ggplot(env_map) +
 par(mfrow = c(2, 1))
 hist(env_test$EA073, xlim = range(env_map$EA073, na.rm = TRUE), main = "EA073 - tested trials", xlab = "EA073")
 hist(env_map$EA073, xlim = range(env_map$EA073, na.rm = TRUE), main = "EA073 - target region", xlab = "EA073")
-par(mfrow = c(1, 1));dev.off()
+par(mfrow = c(1, 1))
 
 # -----------------------------------------------------------------------------
 # 2. Environmental markers, enviromic kernel and PCA
@@ -115,7 +116,7 @@ cat("  Off-diagonal range:", paste(round(range(KE[upper.tri(KE)]), 4), collapse 
 image(KE, main = "Linear enviromic kernel using all EA markers", xlab = "Trial", ylab = "Trial")
 
 # -----------------------------------------------------------------------------
-# 3. Baseline and enviromic random regression models
+# 3. MOD0 baseline and MOD2 random regression
 # -----------------------------------------------------------------------------
 
 form_rr <- as.formula(paste(
@@ -124,7 +125,13 @@ form_rr <- as.formula(paste(
 ))
 
 MOD0 <- lmer(Yield ~ 1 + (1 | Genotype), data = phe_pc, REML = TRUE)
-MOD2 <- lmer(form_rr, data = phe_pc, REML = TRUE, control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)))
+
+MOD2 <- lmer(
+  form_rr,
+  data = phe_pc,
+  REML = TRUE,
+  control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+)
 
 vc_rr <- as.data.frame(VarCorr(MOD2))
 vc_rr <- vc_rr[vc_rr$grp != "Residual" & is.na(vc_rr$var2), ]
@@ -134,15 +141,15 @@ names(sigma_a_diag) <- as.character(vc_rr$var1)
 sigma_a_diag <- sigma_a_diag[c("(Intercept)", pc_names)]
 
 cat("\nFinal models:\n")
-cat("  Baseline residual variance :", round(sigma(MOD0)^2, 4), "\n")
-cat("  Enviromic residual variance:", round(sigma(MOD2)^2, 4), "\n")
-cat("  Baseline singular fit      :", isSingular(MOD0), "\n")
-cat("  Enviromic singular fit     :", isSingular(MOD2), "\n")
-cat("  Random coefficient variances:\n")
+cat("  MOD0 baseline residual variance :", round(sigma(MOD0)^2, 4), "\n")
+cat("  MOD2 enviromic residual variance:", round(sigma(MOD2)^2, 4), "\n")
+cat("  MOD0 singular fit               :", isSingular(MOD0), "\n")
+cat("  MOD2 singular fit               :", isSingular(MOD2), "\n")
+cat("  MOD2 random coefficient variances:\n")
 print(round(sigma_a_diag, 4))
 
 # -----------------------------------------------------------------------------
-# 4. CV0 validation
+# 4. CV0 validation: MOD0 vs MOD1 vs MOD2
 # -----------------------------------------------------------------------------
 
 tr_cv <- setdiff(tr_all, val_trials)
@@ -170,45 +177,88 @@ phe_cv$Trial <- factor(phe_cv$Trial, levels = tr_all)
 train_cv <- droplevels(phe_cv[!phe_cv$Trial %in% val_trials, ])
 valid_cv <- droplevels(phe_cv[phe_cv$Trial %in% val_trials, ])
 
-MOD0_cv <- lmer(Yield ~ 1 + (1 | Genotype), data = train_cv, REML = TRUE)
-MOD2_cv <- lmer(form_rr, data = train_cv, REML = TRUE, control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5)))
+# MOD0: baseline
 
-valid_cv$pred_base <- predict(MOD0_cv, newdata = valid_cv, allow.new.levels = TRUE)
-valid_cv$pred_env <- predict(MOD2_cv, newdata = valid_cv, allow.new.levels = TRUE)
+MOD0_cv <- lmer(Yield ~ 1 + (1 | Genotype), data = train_cv, REML = TRUE)
+valid_cv$pred_mod0 <- predict(MOD0_cv, newdata = valid_cv, allow.new.levels = TRUE)
+
+# MOD1: linear enviromic kernel by RR-BLUP using all EA markers
+
+gen_lev <- levels(phe_cv$Genotype)
+zk_names <- c(paste(gen_lev, "INT", sep = ":"), as.vector(t(outer(gen_lev, ea_use_cv, paste, sep = ":"))))
+
+ZK_train <- matrix(0, nrow(train_cv), length(zk_names), dimnames = list(NULL, zk_names))
+ZK_valid <- matrix(0, nrow(valid_cv), length(zk_names), dimnames = list(NULL, zk_names))
+
+for(g in gen_lev) {
+  ii <- train_cv$Genotype == g
+  ZK_train[ii, paste(g, "INT", sep = ":")] <- 1
+  ZK_train[ii, paste(g, ea_use_cv, sep = ":")] <- as.matrix(W_all_cv[as.character(train_cv$Trial[ii]), ea_use_cv])
+  
+  ii <- valid_cv$Genotype == g
+  ZK_valid[ii, paste(g, "INT", sep = ":")] <- 1
+  ZK_valid[ii, paste(g, ea_use_cv, sep = ":")] <- as.matrix(W_all_cv[as.character(valid_cv$Trial[ii]), ea_use_cv])
+}
+
+XK_train <- matrix(1, nrow(train_cv), 1, dimnames = list(NULL, "(Intercept)"))
+XK_valid <- matrix(1, nrow(valid_cv), 1, dimnames = list(NULL, "(Intercept)"))
+
+MOD1_cv <- mixed.solve(y = train_cv$Yield, X = XK_train, Z = ZK_train, method = "REML")
+valid_cv$pred_mod1 <- as.vector(XK_valid %*% MOD1_cv$beta + ZK_valid %*% MOD1_cv$u)
+
+# MOD2: enviromic random regression with PC1-PC5
+
+MOD2_cv <- lmer(
+  form_rr,
+  data = train_cv,
+  REML = TRUE,
+  control = lmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+)
+
+valid_cv$pred_mod2 <- predict(MOD2_cv, newdata = valid_cv, allow.new.levels = TRUE)
 
 pa_by_trial <- do.call(rbind, lapply(split(valid_cv, valid_cv$Trial), \(z) data.frame(
   Trial = as.character(z$Trial[1]),
   n = nrow(z),
-  pa_base = if(length(unique(z$pred_base)) > 1) cor(z$pred_base, z$Yield) else NA,
-  pa_env = if(length(unique(z$pred_env)) > 1) cor(z$pred_env, z$Yield) else NA
+  pa_mod0 = if(length(unique(z$pred_mod0)) > 1) cor(z$pred_mod0, z$Yield) else NA,
+  pa_mod1 = if(length(unique(z$pred_mod1)) > 1) cor(z$pred_mod1, z$Yield) else NA,
+  pa_mod2 = if(length(unique(z$pred_mod2)) > 1) cor(z$pred_mod2, z$Yield) else NA
 )))
 
-pa_base_all <- cor(valid_cv$pred_base, valid_cv$Yield)
-pa_env_all <- cor(valid_cv$pred_env, valid_cv$Yield)
-pa_base_mean <- mean(pa_by_trial$pa_base, na.rm = TRUE)
-pa_env_mean <- mean(pa_by_trial$pa_env, na.rm = TRUE)
-pa_wins <- sum(pa_by_trial$pa_env > pa_by_trial$pa_base, na.rm = TRUE)
+pa_mod0_all <- cor(valid_cv$pred_mod0, valid_cv$Yield)
+pa_mod1_all <- cor(valid_cv$pred_mod1, valid_cv$Yield)
+pa_mod2_all <- cor(valid_cv$pred_mod2, valid_cv$Yield)
+
+pa_mod0_mean <- mean(pa_by_trial$pa_mod0, na.rm = TRUE)
+pa_mod1_mean <- mean(pa_by_trial$pa_mod1, na.rm = TRUE)
+pa_mod2_mean <- mean(pa_by_trial$pa_mod2, na.rm = TRUE)
+
+pa_mod1_wins <- sum(pa_by_trial$pa_mod1 > pa_by_trial$pa_mod0, na.rm = TRUE)
+pa_mod2_wins <- sum(pa_by_trial$pa_mod2 > pa_by_trial$pa_mod0, na.rm = TRUE)
 
 cat("\nCV0 validation:\n")
-cat("  Hidden trials                 :", paste(val_trials, collapse = ", "), "\n")
-cat("  PC1-PC5 cumulative variance   :", round(sum(pc_var_cv), 1), "%\n")
-cat("  Baseline singular fit         :", isSingular(MOD0_cv), "\n")
-cat("  Enviromic singular fit        :", isSingular(MOD2_cv), "\n")
-cat("  Overall pa - baseline         :", round(pa_base_all, 3), "\n")
-cat("  Overall pa - enviromic        :", round(pa_env_all, 3), "\n")
-cat("  Mean within-trial pa baseline :", round(pa_base_mean, 3), "\n")
-cat("  Mean within-trial pa enviromic:", round(pa_env_mean, 3), "\n")
-cat("  Trials won by enviromics      :", pa_wins, "/", nrow(pa_by_trial), "\n")
+cat("  Hidden trials                    :", paste(val_trials, collapse = ", "), "\n")
+cat("  PC1-PC5 cumulative variance      :", round(sum(pc_var_cv), 1), "%\n")
+cat("  MOD0 overall pa                  :", round(pa_mod0_all, 3), "\n")
+cat("  MOD1 overall pa                  :", round(pa_mod1_all, 3), "\n")
+cat("  MOD2 overall pa                  :", round(pa_mod2_all, 3), "\n")
+cat("  MOD0 mean within-trial pa        :", round(pa_mod0_mean, 3), "\n")
+cat("  MOD1 mean within-trial pa        :", round(pa_mod1_mean, 3), "\n")
+cat("  MOD2 mean within-trial pa        :", round(pa_mod2_mean, 3), "\n")
+cat("  MOD1 trials won over MOD0        :", pa_mod1_wins, "/", nrow(pa_by_trial), "\n")
+cat("  MOD2 trials won over MOD0        :", pa_mod2_wins, "/", nrow(pa_by_trial), "\n")
+cat("  MOD0 singular fit                :", isSingular(MOD0_cv), "\n")
+cat("  MOD2 singular fit                :", isSingular(MOD2_cv), "\n")
 print(pa_by_trial)
 
-ggplot(valid_cv, aes(Yield, pred_env)) +
+ggplot(valid_cv, aes(Yield, pred_mod2)) +
   geom_point() +
   geom_abline(slope = 1, intercept = 0) +
   theme_bw() +
-  labs(title = paste0("CV0 - enviromic model, pa = ", round(pa_env_all, 3)), x = "Observed hidden Yield", y = "Predicted Yield")
+  labs(title = paste0("CV0 - MOD2, pa = ", round(pa_mod2_all, 3)), x = "Observed hidden Yield", y = "Predicted Yield")
 
 # -----------------------------------------------------------------------------
-# 5. Prediction on the target region
+# 5. Prediction on the target region using MOD2
 # -----------------------------------------------------------------------------
 
 grid_map <- PC_map
@@ -224,7 +274,7 @@ cat("  Map pixels used:", nrow(grid_map), "\n")
 cat("  Predictions    :", nrow(pred_grid), "\n")
 
 # -----------------------------------------------------------------------------
-# 6. Recommendation maps
+# 6. Recommendation maps using MOD2
 # -----------------------------------------------------------------------------
 
 win <- pred_grid[ave(pred_grid$y_hat, pred_grid$pixel, FUN = max) == pred_grid$y_hat, ]
@@ -254,7 +304,7 @@ ggplot(win) +
   labs(title = "Predicted performance of the winner", fill = "y_hat")
 
 # -----------------------------------------------------------------------------
-# 7. Reaction norms across the predicted environmental gradient
+# 7. Reaction norms across the predicted environmental gradient using MOD2
 # -----------------------------------------------------------------------------
 
 env_grad <- aggregate(y_hat ~ pixel, pred_grid, mean)
@@ -275,7 +325,7 @@ ggplot(rn, aes(env_bin, y_hat_mean, group = Genotype)) +
   labs(title = "Reaction norms across the wide-environment gradient", x = "Wide-environment gradient", y = "Mean predicted yield", color = "Genotype")
 
 # -----------------------------------------------------------------------------
-# 8. Gain over reference genotype
+# 8. Gain over reference genotype using MOD2
 # -----------------------------------------------------------------------------
 
 ref_pred <- pred_grid[pred_grid$Genotype == ref_gen, c("pixel", "y_hat")]
@@ -319,7 +369,7 @@ cat("  Distance threshold:", round(dist_thr, 3), "\n")
 print(table(win$reliability))
 
 # -----------------------------------------------------------------------------
-# 10. Approximate spatial heritability
+# 10. Approximate spatial heritability using MOD2
 # -----------------------------------------------------------------------------
 
 Wd_grid <- as.matrix(cbind("(Intercept)" = 1, grid_map[, pc_names]))
@@ -338,7 +388,7 @@ ggplot(grid_map) +
   labs(title = "Approximate spatial heritability", fill = "h2")
 
 # -----------------------------------------------------------------------------
-# 11. Breeding zones from predicted genotype profiles
+# 11. Breeding zones from predicted genotype profiles using MOD2
 # -----------------------------------------------------------------------------
 
 pred_mat <- xtabs(y_hat ~ pixel + Genotype, pred_grid)
@@ -369,9 +419,11 @@ cat("  Completeness                   :", round(100 * nrow(phe) / (nlevels(phe$G
 cat("  Genotypes                      :", nlevels(phe$Genotype), "\n")
 cat("  Trials                         :", nlevels(phe$Trial), "\n")
 cat("  PC1-PC5 variance in CV0 train  :", round(sum(pc_var_cv), 1), "%\n")
-cat("  CV0 pa baseline, mean within   :", round(pa_base_mean, 3), "\n")
-cat("  CV0 pa enviromic, mean within  :", round(pa_env_mean, 3), "\n")
-cat("  CV0 trials won by enviromics   :", pa_wins, "/", nrow(pa_by_trial), "\n")
+cat("  CV0 MOD0 mean within pa        :", round(pa_mod0_mean, 3), "\n")
+cat("  CV0 MOD1 mean within pa        :", round(pa_mod1_mean, 3), "\n")
+cat("  CV0 MOD2 mean within pa        :", round(pa_mod2_mean, 3), "\n")
+cat("  CV0 MOD1 wins over MOD0        :", pa_mod1_wins, "/", nrow(pa_by_trial), "\n")
+cat("  CV0 MOD2 wins over MOD0        :", pa_mod2_wins, "/", nrow(pa_by_trial), "\n")
 cat("  Most recommended genotype      :", names(rec_tab)[1], "\n")
 cat("  Mean gain over reference       :", round(mean(win$gain_ref), 3), "\n")
 cat("  Mean gain over reference (%)   :", round(mean(win$gain_ref_pct), 2), "\n")
